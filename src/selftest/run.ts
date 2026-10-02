@@ -51,7 +51,7 @@ function synthHand(cx: number, curl: number, pinch = false): TrackedHand {
   if (pinch) pts[LM.INDEX_TIP] = lm(cx, -1.6); // thumb+index touching
   pts[LM.INDEX_MCP] = lm(cx - 0.35, -0.9);
   pts[LM.PINKY_MCP] = lm(cx + 0.35, -0.9);
-  return { landmarks: pts, handedness: 'Unknown', score: 0.95 };
+  return { landmarks: pts, handedness: 'Unknown', score: 0.95, gesture: '', gestureScore: 0 };
 }
 
 // ---------------------------------------------------------------------------

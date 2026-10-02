@@ -12,6 +12,9 @@ import { Game } from './game/game.ts';
 import { AudioEngine } from './audio/synth.ts';
 import { HUD } from './ui/hud.ts';
 import { Screens } from './ui/screens.ts';
+import { GestureLab } from './ui/gesture-lab.ts';
+import { HandSkeletonOverlay } from './ui/hand-skeleton.ts';
+import { VirtualWheel } from './ui/virtual-wheel.ts';
 import {
   cameraDiagnosticsText,
   cameraFixHint,
@@ -50,13 +53,23 @@ class App {
   private audio = new AudioEngine();
   private hud: HUD;
   private screens: Screens;
+  private gestureLab: GestureLab | null = null;
+  private skeleton: HandSkeletonOverlay | null = null;
+  private wheel: VirtualWheel | null = null;
   private game: Game | null = null;
   private tracking: TrackingClient | null = null;
+  private trackingDelegate = '—';
   private net = createAdapter('local');
   private playerId = `p-${Math.random().toString(36).slice(2, 10)}`;
 
   private latestHands: TrackedHand[] = [];
   private latestControl: ControlState | null = null;
+  /** Timestamp of last frame with hands visible (for tracking-loss detection). */
+  private lastHandsSeen = 0;
+  /** Why the game was paused ('tracking-lost' enables auto-resume). */
+  private pauseReason: string | null = null;
+  /** True when the current race uses hand controls (not keyboard). */
+  private usingHandControls = false;
   private mode: GameMode = 'cruise';
   private kbMode = false;
   /** Diagnostics panel shows only on the first camera failure per session. */
@@ -80,7 +93,12 @@ class App {
 
   constructor() {
     const uiRoot = document.getElementById('ui-root')!;
-    this.hud = new HUD(uiRoot);
+    this.hud = new HUD(uiRoot, {
+      onPause: () => {
+        if (this.state === 'racing') this.pause();
+        else if (this.state === 'paused') this.resume();
+      },
+    });
     this.screens = new Screens(uiRoot, {
       onStart: (m) => void this.startRace(m),
       onResume: () => this.resume(),
@@ -110,7 +128,26 @@ class App {
       },
     });
 
-    // Glove overlay canvas (transparent, above WebGL, below UI panels).
+    // Gesture Lab (diagnostics) — hidden until opened from camera setup.
+    this.gestureLab = new GestureLab(uiRoot, {
+      onBack: () => this.closeGestureLab(),
+      onCopy: () => {
+        const m = this.tracking?.getMetrics();
+        const text = this.gestureLab!.snapshot(
+          {
+            inferMs: m?.inferMs ?? 0,
+            fps: m?.fps ?? 0,
+            degraded: m?.degraded ?? false,
+            delegate: this.trackingDelegate,
+          },
+          this.latestControl,
+        );
+        void navigator.clipboard?.writeText(text).then(
+          () => this.hud.flash('Readings copied'),
+          () => this.hud.flash('Copy failed — screenshot instead'),
+        );
+      },
+    });
     this.overlay = document.createElement('canvas');
     this.overlay.id = 'glove-overlay';
     document.getElementById('app')!.appendChild(this.overlay);
@@ -129,6 +166,7 @@ class App {
       if (document.hidden && this.state === 'racing') this.pause();
     });
 
+    this.initOverlays();
     void this.boot();
   }
 
@@ -291,6 +329,7 @@ class App {
         void this.startRace(this.mode);
       },
       onBack: () => this.closeCameraSetup(),
+      onLab: () => this.openGestureLab(),
     });
     const preview = document.getElementById('setup-preview') as HTMLVideoElement | null;
     const stream = feed.srcObject as MediaStream | null;
@@ -315,6 +354,32 @@ class App {
     this.screens.hideAll();
     this.state = 'menu';
     this.screens.showMenu(this.highScores[this.mode]);
+  }
+
+  /** Open the Gesture Lab diagnostics overlay (from camera setup). */
+  private openGestureLab(): void {
+    this.setupOpen = false;
+    this.screens.hideAll();
+    this.gestureLab?.show();
+  }
+
+  private closeGestureLab(): void {
+    this.gestureLab?.hide();
+    // Return to the camera setup environment.
+    void this.openCameraSetup();
+  }
+
+  /** Create the hand-driven control overlays (skeleton + virtual wheel). */
+  private initOverlays(): void {
+    this.skeleton = new HandSkeletonOverlay();
+    this.wheel = new VirtualWheel();
+    this.applyOverlaySettings();
+  }
+
+  /** Apply settings toggles to the overlays. */
+  private applyOverlaySettings(): void {
+    this.skeleton?.setVisible(this.cal.showSkeleton && this.usingHandControls);
+    this.wheel?.setVisible(this.cal.showWheel && this.usingHandControls);
   }
 
   /** Draw the mirrored skeleton overlay + update setup readouts. */
@@ -419,6 +484,13 @@ class App {
     this.game!.setPaused(false);
     this.game!.start(this.mode);
     this.state = 'racing';
+    this.usingHandControls = !this.kbMode;
+    this.pauseReason = null;
+    this.lastHandsSeen = 0;
+    this.applyOverlaySettings();
+    // Clear any stale "waiting for camera" banner; keyboard mode gets its own.
+    this.hud.clearFlash();
+    if (this.kbMode) this.hud.flash('No camera — keyboard mode (WASD/arrows)');
   }
 
   private pause(): void {
@@ -453,6 +525,9 @@ class App {
       this.launchGame();
     } else if (this.screens.currentScreenId === 'setup') {
       this.closeCameraSetup();
+    } else if (this.state === 'menu') {
+      // Closing settings/howto/calibration from the menu → back to menu.
+      this.screens.showMenu(this.highScores[this.mode]);
     } else this.screens.hideAll();
   }
 
@@ -463,9 +538,67 @@ class App {
     const c = this.engine.update(frame);
     this.latestControl = c;
 
+    // Tracking-loss autopause: if racing with hand controls and hands vanish
+    // for >300ms, pause with a clear message. Instant resume on reacquire.
+    // (Prevents the car driving blind when tracking drops.)
+    const now = performance.now();
+    if (frame.hands.length > 0) {
+      this.lastHandsSeen = now;
+      if (this.state === 'paused' && this.pauseReason === 'tracking-lost') {
+        this.pauseReason = null;
+        this.resume();
+      }
+    } else if (
+      this.state === 'racing' &&
+      this.usingHandControls &&
+      this.lastHandsSeen > 0 &&
+      now - this.lastHandsSeen > 300
+    ) {
+      this.pauseReason = 'tracking-lost';
+      this.pause();
+      this.hud.flash('TRACKING INTERRUPTED — show your hands', 3000);
+    }
+
+    // Gesture Lab live update (if open).
+    if (this.gestureLab?.isOpen && this.tracking) {
+      const m = this.tracking.getMetrics();
+      this.gestureLab.update(
+        {
+          inferMs: m.inferMs,
+          fps: m.fps,
+          degraded: m.degraded,
+          delegate: this.trackingDelegate,
+        },
+        c,
+      );
+    }
+
     // Pinch cursor + pinch-to-click work on menus too (calibration, pause).
     this.hud.showCursor(c.pinch.x, c.pinch.y, c.pinch.active, frame.hands.length > 0);
     if (c.pinchStarted) this.pinchClick(c.pinch.x, c.pinch.y);
+
+    // Hand-driven control overlays: skeleton fingers + virtual wheel.
+    // Only during racing/paused with hand controls (not on menus).
+    const showOverlays = (this.state === 'racing' || this.state === 'paused')
+      && this.usingHandControls;
+    if (showOverlays) {
+      this.skeleton?.draw(frame.hands.map((h) => ({
+        landmarks: h.landmarks,
+        label: h.handedness === 'Unknown' ? 'Left' : h.handedness,
+        grip: c.gripLocked,
+      })));
+      // Grip markers: left/right hand wrist positions for the wheel.
+      const lw = frame.hands.find((h) => h.handedness === 'Left')?.landmarks[0];
+      const rw = frame.hands.find((h) => h.handedness === 'Right')?.landmarks[0];
+      this.wheel?.update(
+        c.steering,
+        c.gripLocked,
+        lw ? { x: 1 - lw.x, y: lw.y } : null,
+        rw ? { x: 1 - rw.x, y: rw.y } : null,
+      );
+    } else {
+      this.skeleton?.draw([]);
+    }
 
     if (this.state === 'racing' || this.state === 'paused') {
       const input: DriveInput = { steering: c.steering, throttle: c.throttle, brake: c.brake };
@@ -539,6 +672,8 @@ class App {
     } else if (s === 'ready') {
       this.hud.clearFlash();
       this.hud.flash(`✋ Hand tracking ready${detail ? ` (${detail})` : ''}`);
+      const m = /delegate=(\w+)/.exec(detail ?? '');
+      if (m) this.trackingDelegate = m[1];
     } else if (s === 'no-camera' || s === 'error') {
       this.hud.clearFlash();
       console.warn('[tracking]', s, detail);
@@ -561,6 +696,7 @@ class App {
   private sampleCalibration(): {
     angle: number | null;
     scale: number | null;
+    cx: number | null;
     pinch: number | null;
     hands: number;
     gripLocked: boolean;
@@ -574,6 +710,7 @@ class App {
     return {
       angle: grip.locked ? grip.angle : null,
       scale: grip.locked ? grip.scale : null,
+      cx: grip.locked ? grip.cx : null,
       pinch,
       hands: hands.length,
       gripLocked: grip.locked,
@@ -587,6 +724,7 @@ class App {
     this.game?.setCameraMode(c.camera);
     this.game?.setSpeedLimit(c.speedLimit);
     this.audio.setMuted(c.muted);
+    this.applyOverlaySettings();
   }
 
   // ---------------- keyboard fallback ----------------

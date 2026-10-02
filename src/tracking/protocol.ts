@@ -9,6 +9,13 @@ export interface WorkerHand {
   handedness: 'Left' | 'Right' | 'Unknown';
   /** Detection confidence 0..1. */
   score: number;
+  /**
+   * Classified gesture from MediaPipe GestureRecognizer (e.g. "Closed_Fist",
+   * "Open_Palm", "Pointing_Up"). Empty string when unclassified.
+   */
+  gesture: string;
+  /** Classification confidence 0..1. */
+  gestureScore: number;
 }
 
 export type WorkerIn =

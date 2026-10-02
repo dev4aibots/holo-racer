@@ -53,6 +53,16 @@ export class TrackingClient {
   private captureIntervalMs = 1000 / TRACKING.TARGET_FPS;
   private inferAvg = 0;
   private degraded = false;
+  /** Rolling end-to-end latency (capture → result arrival), for prediction. */
+  private e2eAvg = 0;
+  /**
+   * Backpressure flag: true while the worker is processing a frame.
+   * The worker runs detectForVideo synchronously (blocking), so without this
+   * the client would queue frames faster than inference completes and latency
+   * would grow unboundedly. With it, the worker always processes the FRESHEST
+   * frame and end-to-end latency is exactly one inference time.
+   */
+  private inflight = false;
   private cb: TrackingCallbacks;
 
   constructor(video: HTMLVideoElement, cb: TrackingCallbacks) {
@@ -76,8 +86,10 @@ export class TrackingClient {
       this.stream = await withTimeout(
         navigator.mediaDevices.getUserMedia({
           video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            // Match the 640x480 inference canvas — requesting 720p only wastes
+            // USB bandwidth and downscale CPU for pixels we throw away.
+            width: { ideal: 640 },
+            height: { ideal: 480 },
             facingMode: 'user',
           },
           audio: false,
@@ -102,13 +114,13 @@ export class TrackingClient {
     this.video.muted = true;
     await this.video.play().catch(() => undefined);
 
-    // The hand model (~8MB) is the long pole on first run. MediaPipe gives no
+    // The gesture model (~8MB) is the long pole on first run. MediaPipe gives no
     // download progress, so fetch it here with a progress callback — otherwise
     // the UI sits on "Starting…" with no feedback on slow connections.
     this.cb.onStatus('loading-model', '0%');
-    let modelUrl: string = TRACKING.MODEL_URL;
+    let modelUrl: string = TRACKING.GESTURE_MODEL_URL;
     try {
-      const blob = await fetchWithProgress(TRACKING.MODEL_URL, (pct) => {
+      const blob = await fetchWithProgress(TRACKING.GESTURE_MODEL_URL, (pct) => {
         this.cb.onStatus('loading-model', `${pct}%`);
       });
       this.modelBlobUrl = URL.createObjectURL(blob);
@@ -142,7 +154,19 @@ export class TrackingClient {
     }
 
     this.lastCapture = performance.now();
-    this.timer = window.setInterval(() => void this.capture(), 8);
+    // Drive capture with requestVideoFrameCallback when available: it fires
+    // when the compositor presents a NEW frame, so we always infer on the
+    // freshest image, aligned to vsync. Falls back to setInterval polling.
+    if (typeof (this.video as any).requestVideoFrameCallback === 'function') {
+      const rvfc = () => {
+        if (!this.running) return;
+        void this.capture();
+        (this.video as any).requestVideoFrameCallback(rvfc);
+      };
+      (this.video as any).requestVideoFrameCallback(rvfc);
+    } else {
+      this.timer = window.setInterval(() => void this.capture(), 8);
+    }
   }
 
   /**
@@ -246,6 +270,15 @@ export class TrackingClient {
     return this.ready;
   }
 
+  /** Live pipeline metrics for diagnostics. */
+  getMetrics(): { inferMs: number; fps: number; degraded: boolean } {
+    return {
+      inferMs: this.inferAvg,
+      fps: this.captureIntervalMs > 0 ? 1000 / this.captureIntervalMs : 0,
+      degraded: this.degraded,
+    };
+  }
+
   private handleWorker(msg: WorkerOut): void {
     switch (msg.type) {
       case 'ready':
@@ -253,12 +286,20 @@ export class TrackingClient {
         this.cb.onStatus('ready', `delegate=${msg.delegate}`);
         break;
       case 'result': {
+        this.inflight = false;
+        // Measure end-to-end latency: capture timestamp → now.
+        // Use it to predict landmarks forward, cancelling perceived lag.
+        const now = performance.now();
+        const e2e = now - msg.t;
+        this.e2eAvg = this.e2eAvg === 0 ? e2e : this.e2eAvg * 0.9 + e2e * 0.1;
+        this.smoother.setLookahead(this.e2eAvg / 1000);
         this.adaptToLatency(msg.inferMs);
         const hands = this.processHands(msg.hands, msg.t);
         this.cb.onFrame({ t: msg.t, hands });
         break;
       }
       case 'error':
+        this.inflight = false;
         this.cb.onStatus(msg.fatal ? 'error' : 'degraded', msg.message);
         if (msg.fatal) {
           this.ready = false;
@@ -284,6 +325,9 @@ export class TrackingClient {
 
   private async capture(): Promise<void> {
     if (!this.running || !this.ready || !this.worker) return;
+    // Backpressure: drop this tick if the worker is still on the previous
+    // frame. This keeps latency at one inference time instead of queueing.
+    if (this.inflight) return;
     const now = performance.now();
     if (now - this.lastCapture < this.captureIntervalMs) return;
     if (this.video.readyState < 2 || this.video.videoWidth === 0) return;
@@ -312,6 +356,7 @@ export class TrackingClient {
     this.ctx.drawImage(this.video, sx, sy, sw, sh, 0, 0, TRACKING.WIDTH, TRACKING.HEIGHT);
     try {
       const bitmap = await createImageBitmap(this.canvas);
+      this.inflight = true;
       this.worker.postMessage({ type: 'frame', bitmap, t: now } satisfies WorkerIn, [bitmap]);
     } catch {
       /* frame dropped — next tick will try again */
@@ -331,6 +376,8 @@ export class TrackingClient {
       handedness:
         h.handedness === 'Left' ? 'Right' : h.handedness === 'Right' ? 'Left' : 'Unknown',
       score: h.score,
+      gesture: h.gesture,
+      gestureScore: h.gestureScore,
     }));
   }
 }

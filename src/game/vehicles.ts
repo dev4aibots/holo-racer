@@ -138,17 +138,36 @@ export function buildHologramCar(color: number): THREE.Group {
     car.add(tail);
   }
 
-  // Wheels.
+  // Wheels with glowing rims.
   const wheels: THREE.Mesh[] = [];
   const wg = wheelGeo();
   const wm = wheelMat();
+  const rimGeo = boxGeo('rim', 0.36, 0.1, 0.1);
   for (const [sx, sz] of [[-0.98, -1.35], [0.98, -1.35], [-0.98, 1.35], [0.98, 1.35]] as const) {
     const wheel = new THREE.Mesh(wg, wm);
     wheel.position.set(sx, 0.34, sz);
     car.add(wheel);
     wheels.push(wheel);
+    // Glowing rim accent.
+    const rim = new THREE.Mesh(rimGeo, lightMat(color));
+    rim.position.set(sx + (sx > 0 ? 0.17 : -0.17), 0.34, sz);
+    car.add(rim);
   }
   car.userData.wheels = wheels;
+
+  // Sporty spoiler.
+  const spoiler = new THREE.Mesh(boxGeo('spoiler', 1.7, 0.08, 0.45), bodyMat());
+  spoiler.position.set(0, 1.25, 1.85);
+  car.add(spoiler);
+  const spoilerWire = new THREE.Mesh(boxGeo('spoiler', 1.7, 0.08, 0.45), edgeMat(color));
+  spoilerWire.position.copy(spoiler.position);
+  spoilerWire.scale.set(1.02, 1.3, 1.05);
+  car.add(spoilerWire);
+  for (const sx of [-0.7, 0.7]) {
+    const strut = new THREE.Mesh(boxGeo('strut', 0.08, 0.35, 0.08), bodyMat());
+    strut.position.set(sx, 1.05, 1.85);
+    car.add(strut);
+  }
 
   // Holographic underglow.
   const glow = new THREE.Mesh(glowGeo(), glowMat(color));

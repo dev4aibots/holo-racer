@@ -18,6 +18,7 @@ export function loadCalibration(): Calibration {
     return {
       neutralAngle: isNum(p.neutralAngle) ? p.neutralAngle : d.neutralAngle,
       neutralScale: isNum(p.neutralScale) && p.neutralScale > 0.01 ? p.neutralScale : d.neutralScale,
+      neutralCx: isNum(p.neutralCx) ? Math.min(1, Math.max(0, p.neutralCx)) : d.neutralCx,
       pinchDown: isNum(p.pinchDown) ? p.pinchDown : d.pinchDown,
       pinchUp: isNum(p.pinchUp) && p.pinchUp > (p.pinchDown ?? 0) ? p.pinchUp : d.pinchUp,
       oneHandMode: typeof p.oneHandMode === 'boolean' ? p.oneHandMode : d.oneHandMode,
@@ -26,6 +27,8 @@ export function loadCalibration(): Calibration {
       muted: typeof p.muted === 'boolean' ? p.muted : d.muted,
       speedLimit: isNum(p.speedLimit) ? Math.min(1, Math.max(0.4, p.speedLimit)) : d.speedLimit,
       showCamPreview: typeof p.showCamPreview === 'boolean' ? p.showCamPreview : d.showCamPreview,
+      showSkeleton: typeof p.showSkeleton === 'boolean' ? p.showSkeleton : d.showSkeleton,
+      showWheel: typeof p.showWheel === 'boolean' ? p.showWheel : d.showWheel,
     };
   } catch {
     return { ...DEFAULT_CALIBRATION };

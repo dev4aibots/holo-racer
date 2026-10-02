@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { GAME } from '../config.ts';
 
-export type TrackVariant = 'neon-city' | 'coast';
+import type { TrackVariant } from './tracks.ts';
 
 const SEG_LEN = 150;
 const SEG_COUNT = 3;
@@ -142,28 +142,33 @@ export class World {
   }
 
   setVariant(v: TrackVariant): void {
-    if (v === 'neon-city') {
-      this.scene.fog = new THREE.Fog(0x0b1030, 45, 260);
-      this.scene.background = new THREE.Color(0x0b1030);
-      this.skyMat.map = this.skyNeon;
-      this.hemi.color.set(0x4a5aa8);
-      this.hemi.groundColor.set(0x0a0c18);
-      this.hemi.intensity = 0.75;
-      this.dir.color.set(0xff9a5c);
-      this.dir.intensity = 0.9;
-      this.groundMat.color.set(0x070912);
-      for (const s of this.strips) s.visible = true;
-    } else {
-      this.scene.fog = new THREE.Fog(0xcfe8f7, 60, 340);
-      this.scene.background = new THREE.Color(0xcfe8f7);
-      this.skyMat.map = this.skyCoast;
-      this.hemi.color.set(0xbfe3ff);
-      this.hemi.groundColor.set(0x9a8a6a);
-      this.hemi.intensity = 1.15;
-      this.dir.color.set(0xfff2d8);
-      this.dir.intensity = 1.5;
-      this.groundMat.color.set(0xcbb37e);
-      for (const s of this.strips) s.visible = false;
+    // Per-track atmosphere: fog, sky, lighting, ground.
+    const themes: Record<TrackVariant, {
+      fog: number; fogNear: number; fogFar: number;
+      hemiSky: number; hemiGround: number; hemiInt: number;
+      dirColor: number; dirInt: number; ground: number; strips: boolean;
+    }> = {
+      'neon-city': { fog: 0x0b1030, fogNear: 45, fogFar: 260, hemiSky: 0x4a5aa8, hemiGround: 0x0a0c18, hemiInt: 0.75, dirColor: 0xff9a5c, dirInt: 0.9, ground: 0x070912, strips: true },
+      'coast': { fog: 0xcfe8f7, fogNear: 60, fogFar: 340, hemiSky: 0xbfe3ff, hemiGround: 0x9a8a6a, hemiInt: 1.15, dirColor: 0xfff2d8, dirInt: 1.5, ground: 0xcbb37e, strips: false },
+      'desert': { fog: 0xe8a45c, fogNear: 55, fogFar: 320, hemiSky: 0xffd9a0, hemiGround: 0x8a5a2a, hemiInt: 1.2, dirColor: 0xff7733, dirInt: 1.6, ground: 0xc99049, strips: false },
+      'arctic': { fog: 0x9fc8e8, fogNear: 50, fogFar: 300, hemiSky: 0xcfe8ff, hemiGround: 0x6a8aaa, hemiInt: 1.0, dirColor: 0xaad4ff, dirInt: 1.1, ground: 0xd8e8f0, strips: true },
+      'volcano': { fog: 0x1a0a08, fogNear: 40, fogFar: 240, hemiSky: 0x883322, hemiGround: 0x0a0505, hemiInt: 0.7, dirColor: 0xff5522, dirInt: 1.2, ground: 0x140808, strips: true },
+    };
+    const t = themes[v];
+    this.scene.fog = new THREE.Fog(t.fog, t.fogNear, t.fogFar);
+    this.scene.background = new THREE.Color(t.fog);
+    this.skyMat.map = v === 'neon-city' ? this.skyNeon : this.skyCoast;
+    this.hemi.color.set(t.hemiSky);
+    this.hemi.groundColor.set(t.hemiGround);
+    this.hemi.intensity = t.hemiInt;
+    this.dir.color.set(t.dirColor);
+    this.dir.intensity = t.dirInt;
+    this.groundMat.color.set(t.ground);
+    for (const s of this.strips) s.visible = t.strips;
+    // Strip color per theme: cyan for neon/arctic, orange for volcano.
+    const stripColor = v === 'volcano' ? 0xff6622 : 0x00e5ff;
+    for (const s of this.strips) {
+      (s.material as THREE.MeshBasicMaterial).color.set(stripColor);
     }
     this.skyMat.needsUpdate = true;
   }
@@ -177,6 +182,13 @@ export class World {
     }
     this.ground.position.z = playerZ - 260;
     this.sky.position.set(0, 0, playerZ - 150);
+    // Pulse the neon edge strips for a living holographic feel.
+    const t = performance.now() / 1000;
+    const pulse = 0.75 + 0.25 * Math.sin(t * 2.4);
+    for (const s of this.strips) {
+      const m = s.material as THREE.MeshBasicMaterial;
+      m.opacity = 0.85 * pulse;
+    }
   }
 
   dispose(): void {

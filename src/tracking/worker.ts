@@ -1,22 +1,24 @@
 /**
  * Hand-tracking Web Worker.
  *
- * Runs MediaPipe HandLandmarker off the main thread so inference never blocks
- * rendering. Receives transferred ImageBitmaps, runs detectForVideo, and posts
- * back plain landmark arrays. GPU delegate first, automatic CPU fallback.
+ * Runs MediaPipe GestureRecognizer off the main thread so inference never
+ * blocks rendering. Receives transferred ImageBitmaps, runs recognizeForVideo,
+ * and posts back landmarks + classified gestures. GPU delegate first,
+ * automatic CPU fallback.
  *
- * MediaPipe is dynamically imported so bundlers code-split it into a separate
- * chunk that only loads when tracking starts.
+ * We use GestureRecognizer (not HandLandmarker) because it returns hand
+ * landmarks AND robust gesture classification (Closed_Fist, Open_Palm, …)
+ * in a single inference pass — the classifier head is more reliable than
+ * heuristic curl ratios, at no extra latency cost.
+ *
+ * MediaPipe is statically imported so the worker inlines cleanly into blob
+ * workers (dynamic import() of a relative chunk cannot resolve from blob:).
  */
-import type { WorkerHand, WorkerIn, WorkerOut } from './protocol.ts';
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
-
-// Static import: this module only ever loads inside the tracking worker,
-// which itself only starts when the camera does — so MediaPipe stays out
-// of the main bundle AND inlines cleanly into blob workers (dynamic
-// import() of a relative chunk cannot resolve from a blob: URL).
 /* eslint-disable @typescript-eslint/no-explicit-any */
-let landmarker: any = null;
+import type { WorkerHand, WorkerIn, WorkerOut } from './protocol.ts';
+import { FilesetResolver, GestureRecognizer } from '@mediapipe/tasks-vision';
+
+let recognizer: any = null;
 let delegate: 'GPU' | 'CPU' = 'GPU';
 let lastTimestamp = 0;
 
@@ -24,7 +26,7 @@ function post(msg: WorkerOut): void {
   (self as unknown as { postMessage(m: WorkerOut): void }).postMessage(msg);
 }
 
-async function createLandmarker(
+async function createRecognizer(
   wasmUrl: string,
   modelUrl: string,
   numHands: number,
@@ -34,11 +36,9 @@ async function createLandmarker(
   tryDelegate: 'GPU' | 'CPU',
 ): Promise<any> {
   // useModule=true: our worker is an ES module worker, and importScripts()
-  // is disallowed inside module workers — the classic UMD loader would fail
-  // with "ModuleFactory not set". The ESM loader sets globalThis.ModuleFactory
-  // via dynamic import(), which works in module workers.
+  // is disallowed inside module workers.
   const fileset = await FilesetResolver.forVisionTasks(wasmUrl, true);
-  return HandLandmarker.createFromOptions(fileset, {
+  return GestureRecognizer.createFromOptions(fileset, {
     baseOptions: { modelAssetPath: modelUrl, delegate: tryDelegate },
     runningMode: 'VIDEO',
     numHands,
@@ -50,13 +50,11 @@ async function createLandmarker(
 
 async function handleInit(msg: Extract<WorkerIn, { type: 'init' }>): Promise<void> {
   // Single delegate attempt. The client recreates the worker when falling
-  // back (a fresh worker gets a fresh module registry — re-importing the WASM
-  // ESM loader in the same worker would hit the module cache and fail with
-  // "ModuleFactory not set").
+  // back (a fresh worker gets a fresh module registry).
   const d = msg.delegate;
   try {
     delegate = d;
-    landmarker = await createLandmarker(
+    recognizer = await createRecognizer(
       msg.wasmUrl,
       msg.modelUrl,
       msg.numHands,
@@ -67,17 +65,17 @@ async function handleInit(msg: Extract<WorkerIn, { type: 'init' }>): Promise<voi
     );
     post({ type: 'ready', delegate: d });
   } catch (err) {
-    landmarker = null;
+    recognizer = null;
     post({
       type: 'error',
-      message: `HandLandmarker init failed (delegate=${d}): ${String(err)}`,
+      message: `GestureRecognizer init failed (delegate=${d}): ${String(err)}`,
       fatal: true,
     });
   }
 }
 
 function handleFrame(bitmap: ImageBitmap, t: number): void {
-  if (!landmarker) {
+  if (!recognizer) {
     bitmap.close();
     return;
   }
@@ -86,20 +84,27 @@ function handleFrame(bitmap: ImageBitmap, t: number): void {
     const ts = Math.max(t, lastTimestamp + 1);
     lastTimestamp = ts;
     const t0 = performance.now();
-    const result = landmarker.detectForVideo(bitmap, ts);
+    const result = recognizer.recognizeForVideo(bitmap, ts);
     const inferMs = performance.now() - t0;
     const hands: WorkerHand[] = result.landmarks.map((lm: Array<{ x: number; y: number; z: number }>, i: number) => {
       const cat = result.handedness?.[i]?.[0];
       const raw = cat?.categoryName === 'Left' || cat?.categoryName === 'Right' ? cat.categoryName : 'Unknown';
+      // Gesture classification: take the top-scoring gesture.
+      const gestures = result.gestures?.[i] ?? [];
+      const top = gestures.length > 0
+        ? gestures.reduce((a: any, b: any) => (b.score > a.score ? b : a))
+        : null;
       return {
         landmarks: lm.map((p) => ({ x: p.x, y: p.y, z: p.z })),
         handedness: raw as WorkerHand['handedness'],
         score: typeof cat?.score === 'number' ? cat.score : 0.5,
+        gesture: top?.categoryName ?? '',
+        gestureScore: typeof top?.score === 'number' ? top.score : 0,
       };
     });
     post({ type: 'result', t, hands, inferMs });
   } catch (err) {
-    post({ type: 'error', message: `detectForVideo failed: ${String(err)}`, fatal: false });
+    post({ type: 'error', message: `recognizeForVideo failed: ${String(err)}`, fatal: false });
   } finally {
     bitmap.close();
   }
@@ -118,8 +123,8 @@ self.onmessage = (ev: MessageEvent<WorkerIn>) => {
       // Re-create on the requested delegate.
       void (async () => {
         try {
-          if (landmarker) {
-            await landmarker.setOptions({ baseOptions: { delegate: msg.delegate } });
+          if (recognizer) {
+            await recognizer.setOptions({ baseOptions: { delegate: msg.delegate } });
             delegate = msg.delegate;
             post({ type: 'ready', delegate });
           }
@@ -130,11 +135,11 @@ self.onmessage = (ev: MessageEvent<WorkerIn>) => {
       break;
     case 'close':
       try {
-        landmarker?.close();
+        recognizer?.close();
       } catch {
         /* noop */
       }
-      landmarker = null;
+      recognizer = null;
       break;
   }
 };

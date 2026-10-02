@@ -4,6 +4,10 @@
  * cameras, and wires together world/tracks/vehicles/traffic/coins/effects.
  */
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { DriveInput, GameMode, GameSnapshot } from '../types.ts';
 import { GAME } from '../config.ts';
 import { World } from './world.ts';
@@ -40,6 +44,8 @@ export class Game {
   private renderer!: THREE.WebGLRenderer;
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
+  private composer!: EffectComposer;
+  private bloom!: UnrealBloomPass;
   private world!: World;
   private playerCar!: THREE.Group;
   private playerWheels: THREE.Mesh[] = [];
@@ -68,7 +74,7 @@ export class Game {
   private lookAt = new THREE.Vector3();
   private camInit = false;
   private shake = 0;
-  private countdownT = 0;
+  private countdownEnd = 0;
   private lastCount = 0;
   private crashCooldownUntil = 0;
   private crashedUntil = 0;
@@ -94,6 +100,24 @@ export class Game {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 1500);
     this.scene.add(this.camera); // speed lines attach to the camera
+
+    // Fog for depth: edges melt into the holographic void.
+    this.scene.background = new THREE.Color(0x02010a);
+    this.scene.fog = new THREE.FogExp2(0x02010a, 0.012);
+
+    // Post-processing: UnrealBloom for the holographic neon glow.
+    // Half-res bloom + high threshold = only neon blooms, cheap.
+    // OutputPass applies ACES tone mapping + sRGB correctly at the end.
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2),
+      0.7,   // strength
+      0.5,   // radius
+      0.85,  // threshold: only bright neon blooms
+    );
+    this.composer.addPass(this.bloom);
+    this.composer.addPass(new OutputPass());
 
     this.world = new World(this.scene);
     this.disposeEnv = buildEnvironment(this.scene, this.variant);
@@ -130,7 +154,7 @@ export class Game {
     this.crashedUntil = 0;
     this.input = { steering: 0, throttle: 0, brake: 0 };
     this.state = 'countdown';
-    this.countdownT = 3.6;
+    this.countdownEnd = performance.now() + 3600;
     this.lastCount = 4;
   }
 
@@ -162,6 +186,7 @@ export class Game {
     const w = this.canvas.clientWidth || 1;
     const h = this.canvas.clientHeight || 1;
     this.renderer.setSize(w, h, false);
+    this.composer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -182,21 +207,22 @@ export class Game {
     const dt = Math.min((t - this.lastT) / 1000, 0.05);
     this.lastT = t;
     if (!this.paused && dt > 0) this.update(dt);
-    this.renderer.render(this.scene, this.camera);
+    this.composer.render();
   };
 
   private update(dt: number): void {
     const now = performance.now();
 
-    // Countdown before controls go live.
+    // Countdown before controls go live. Uses wall-clock time so it stays
+    // 3-2-1-GO even when the frame rate is low (dt is clamped for physics).
     if (this.state === 'countdown') {
-      this.countdownT -= dt;
-      const n = Math.ceil(this.countdownT);
+      const remaining = Math.max(0, (this.countdownEnd - performance.now()) / 1000);
+      const n = Math.ceil(remaining);
       if (n !== this.lastCount && n >= 1 && n <= 3) {
         this.lastCount = n;
         this.cb.onCountdown(n);
       }
-      if (this.countdownT <= 0) {
+      if (remaining <= 0) {
         this.state = 'running';
         this.cb.onCountdown(0); // GO
       }
@@ -298,6 +324,14 @@ export class Game {
       this.camera.position.x += (Math.random() - 0.5) * this.shake * 0.7;
       this.camera.position.y += (Math.random() - 0.5) * this.shake * 0.5;
       this.shake = Math.max(0, this.shake - dt * 2.2);
+    }
+    // FOV kick with speed: widens the view at velocity for a visceral
+    // sense of speed. Base 72, up to 82 at max speed.
+    const speed01 = Math.min(1, this.speed / (GAME.MAX_SPEED * this.speedLimitF));
+    const targetFov = 72 + speed01 * 10;
+    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
+      this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 4);
+      this.camera.updateProjectionMatrix();
     }
     this.camera.lookAt(this.lookAt);
   }

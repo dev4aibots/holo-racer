@@ -19,6 +19,13 @@ export interface TrackedHand {
   handedness: Handedness;
   /** Detection confidence 0..1 as reported by the landmarker. */
   score: number;
+  /**
+   * Classified gesture from MediaPipe GestureRecognizer (e.g. "Closed_Fist",
+   * "Open_Palm", "Pointing_Up", "Thumb_Up", "Victory"). Empty when unclassified.
+   */
+  gesture: string;
+  /** Gesture classification confidence 0..1. */
+  gestureScore: number;
 }
 
 /** One tracking tick from the worker (already smoothed by the client). */
@@ -97,6 +104,8 @@ export interface Calibration {
   neutralAngle: number;
   /** Hand scale (wrist->middle_mcp, normalized units) at neutral distance. */
   neutralScale: number;
+  /** Grip center X (normalized 0..1) at neutral position — for lateral steering. */
+  neutralCx: number;
   /** Normalized pinch thresholds (thumb-index dist / hand scale). */
   pinchDown: number;
   pinchUp: number;
@@ -109,6 +118,8 @@ export interface Calibration {
   speedLimit: number;
   /** Show the live camera feed (PiP) during races + in the setup screen. */
   showCamPreview: boolean;
+  showSkeleton: boolean;
+  showWheel: boolean;
 }
 
 export type GameMode = 'cruise' | 'trial' | 'rush';

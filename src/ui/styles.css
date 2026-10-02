@@ -324,6 +324,22 @@ html, body {
   color: var(--holo-ok);
   box-shadow: 0 0 12px rgba(61, 255, 158, 0.45);
 }
+.hud-pause-btn {
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--holo-dim);
+  background: transparent;
+  color: var(--holo-dim);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  pointer-events: auto;
+}
+.hud-pause-btn:hover {
+  border-color: var(--holo-accent);
+  color: var(--holo-accent);
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.45);
+}
 
 /* Center flash messages + countdown */
 #hud-flash {
@@ -668,3 +684,28 @@ input[type='range']::-moz-range-thumb {
   .holo-panel { padding: 1.1rem 1.2rem; }
   .holo-btn { min-width: 160px; }
 }
+
+/* Gesture Lab diagnostics */
+.lab-panel { max-width: 560px; }
+.lab-section {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--holo-dim);
+  margin: 1.1rem 0 0.4rem;
+  text-align: left;
+}
+.lab-grid { display: flex; flex-direction: column; gap: 0.3rem; }
+.lab-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0.6rem;
+  background: rgba(0, 240, 255, 0.05);
+  border-radius: 8px;
+  font-size: 0.92rem;
+}
+.lab-row span { color: #9fd8e8; }
+.lab-row b { font-family: ui-monospace, monospace; font-weight: 600; }
+.lab-row b.lab-good { color: #3dff9e; }
+.lab-row b.lab-bad { color: #ff4d6d; }

@@ -51,6 +51,10 @@ function fingerCurl(hand: TrackedHand, tipIdx: number, scale: number): number {
 
 /** True when index/middle/ring/pinky are curled into the palm. */
 export function isFist(hand: TrackedHand): boolean {
+  // Prefer the MediaPipe classifier when confident — it's trained on real
+  // hands and more robust than curl ratios across hand shapes/lighting.
+  if (hand.gesture === 'Closed_Fist' && hand.gestureScore >= 0.4) return true;
+  if (hand.gesture === 'Open_Palm' && hand.gestureScore >= 0.4) return false;
   const s = handScale(hand);
   for (const tip of FINGER_TIPS) {
     if (fingerCurl(hand, tip, s) > GESTURES.CURL_RATIO) return false;
@@ -62,6 +66,9 @@ export function isFist(hand: TrackedHand): boolean {
 
 /** True when all fingers + thumb are extended. */
 export function isPalmOpen(hand: TrackedHand): boolean {
+  // Prefer the MediaPipe classifier when confident.
+  if (hand.gesture === 'Open_Palm' && hand.gestureScore >= 0.4) return true;
+  if (hand.gesture === 'Closed_Fist' && hand.gestureScore >= 0.4) return false;
   const s = handScale(hand);
   for (const tip of FINGER_TIPS) {
     if (fingerCurl(hand, tip, s) < GESTURES.EXTEND_RATIO) return false;
@@ -205,12 +212,22 @@ export class GestureEngine {
     const oneHand = this.cal.oneHandMode;
 
     // --- Grip / steering ---
+    // Dual-mode: rotation (wrist-to-wrist vector angle) + lateral (grip
+    // center X). Rotation is primary; lateral catches users who move hands
+    // sideways instead of rotating like a wheel. Both are normalized and
+    // the stronger signal wins.
     const grip = oneHand ? detectSingleFist(hands) : detectGrip(hands);
     let steering = 0;
     let throttle = 0;
     let brake = 0;
     if (grip.locked) {
-      const raw = angleDiff(grip.angle, this.cal.neutralAngle) / GESTURES.MAX_STEER_RAD;
+      // Rotation steering: vector angle vs calibrated neutral.
+      const rotRaw = angleDiff(grip.angle, this.cal.neutralAngle) / GESTURES.MAX_STEER_RAD;
+      // Lateral steering: grip center X vs calibrated neutral.
+      // 0.25 normalized units = full lock (generous, forgiving).
+      const latRaw = (grip.cx - this.cal.neutralCx) / 0.25;
+      // Use the stronger of the two signals.
+      const raw = Math.abs(rotRaw) >= Math.abs(latRaw) ? rotRaw : latRaw;
       steering = clamp(raw * this.cal.sensitivity, -1, 1);
       const pedals = scaleToPedals(grip.scale, this.cal.neutralScale);
       throttle = pedals.throttle;

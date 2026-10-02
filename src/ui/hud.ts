@@ -23,10 +23,11 @@ export class HUD {
   private cursorEl: HTMLElement;
   private flashEl: HTMLElement;
   private countdownEl: HTMLElement;
+  private pauseBtn: HTMLElement;
   private flashTimer: number | null = null;
   private countdownTimer: number | null = null;
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, opts?: { onPause?: () => void }) {
     this.el = document.createElement('div');
     this.el.id = 'hud';
     this.el.className = 'hidden';
@@ -41,6 +42,7 @@ export class HUD {
         <div class="hud-status">
           <span class="track-dot" id="hud-track-dot" title="Tracking quality"></span>
           <span class="grip-badge" id="hud-grip">GRIP</span>
+          <button class="hud-pause-btn" id="hud-pause" title="Pause (P)" aria-label="Pause game">⏸</button>
         </div>
       </div>
       <div id="hud-flash" aria-live="polite"></div>
@@ -62,6 +64,13 @@ export class HUD {
     this.gripEl = q('#hud-grip');
     this.flashEl = q('#hud-flash');
     this.countdownEl = q('#hud-countdown');
+    this.pauseBtn = q('#hud-pause');
+    if (opts?.onPause) {
+      this.pauseBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        opts.onPause?.();
+      });
+    }
 
     // Pinch cursor reticle lives in the root (above screens too).
     this.cursorEl = document.createElement('div');

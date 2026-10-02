@@ -51,6 +51,8 @@ export interface CameraSetupCallbacks {
   onRace(): void;
   /** Leave setup, back to the menu. */
   onBack(): void;
+  /** Open the Gesture Lab diagnostics overlay. */
+  onLab(): void;
 }
 
 /** One live tracking sample for the calibration wizard. */
@@ -58,6 +60,8 @@ export interface CalSample {  /** Grip vector angle (rad), null when no grip loc
   angle: number | null;
   /** Hand scale (wrist->middle_mcp), null when no grip locked. */
   scale: number | null;
+  /** Grip center X (normalized 0..1), null when no grip locked. */
+  cx: number | null;
   /** Normalized thumb-index distance of best hand, null when no hands. */
   pinch: number | null;
   hands: number;
@@ -265,6 +269,50 @@ export class Screens {
       panel.appendChild(row);
     }
 
+    // Hand skeleton overlay toggle
+    {
+      const { row, val } = makeRow('Hand skeleton (fingers)');
+      const t = document.createElement('label');
+      t.className = 'toggle';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = draft.showSkeleton;
+      input.setAttribute('aria-label', 'Hand skeleton overlay');
+      const track = document.createElement('span');
+      track.className = 'track';
+      t.append(input, track);
+      input.addEventListener('change', () => {
+        draft.showSkeleton = input.checked;
+        val.textContent = input.checked ? 'ON' : 'OFF';
+        emit();
+      });
+      val.textContent = draft.showSkeleton ? 'ON' : 'OFF';
+      row.appendChild(t);
+      panel.appendChild(row);
+    }
+
+    // Virtual steering wheel toggle
+    {
+      const { row, val } = makeRow('Virtual steering wheel');
+      const t = document.createElement('label');
+      t.className = 'toggle';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = draft.showWheel;
+      input.setAttribute('aria-label', 'Virtual steering wheel');
+      const track = document.createElement('span');
+      track.className = 'track';
+      t.append(input, track);
+      input.addEventListener('change', () => {
+        draft.showWheel = input.checked;
+        val.textContent = input.checked ? 'ON' : 'OFF';
+        emit();
+      });
+      val.textContent = draft.showWheel ? 'ON' : 'OFF';
+      row.appendChild(t);
+      panel.appendChild(row);
+    }
+
     // Sensitivity slider 0.5–2
     {
       const { row, val } = makeRow('Steering sensitivity');
@@ -428,11 +476,13 @@ export class Screens {
       capture.textContent = 'Hold still… capturing';
       const angles: number[] = [];
       const scales: number[] = [];
+      const cxs: number[] = [];
       const t0 = performance.now();
       const collect = (): void => {
         const s = sample();
         if (s.angle != null) angles.push(s.angle);
         if (s.scale != null) scales.push(s.scale);
+        if (s.cx != null) cxs.push(s.cx);
         if (performance.now() - t0 < 1200) {
           this.rafs.push(requestAnimationFrame(collect));
         } else {
@@ -442,11 +492,14 @@ export class Screens {
             live.innerHTML += `\n<span class="warn">No grip detected — hold the two-fist grip and retry.</span>`;
             return;
           }
-          // Circular mean for the angle, plain mean for scale.
+          // Circular mean for the angle, plain mean for scale and cx.
           const sx = angles.reduce((a, x) => a + Math.sin(x), 0) / angles.length;
           const cx = angles.reduce((a, x) => a + Math.cos(x), 0) / angles.length;
           captured.neutralAngle = Math.atan2(sx, cx);
           captured.neutralScale = scales.reduce((a, x) => a + x, 0) / scales.length;
+          captured.neutralCx = cxs.length > 0
+            ? cxs.reduce((a, x) => a + x, 0) / cxs.length
+            : 0.5;
           this.renderCalStep2(el, sample, captured);
         }
       };
@@ -737,9 +790,11 @@ pinch down: ${(captured.pinchDown ?? 0).toFixed(3)}   up: ${(captured.pinchUp ??
     race.addEventListener('click', cb.onRace);
     const calib = this.btn('setup-calibrate', '🎯 Calibrate gestures');
     calib.addEventListener('click', cb.onCalibrate);
+    const lab = this.btn('setup-lab', '🔬 Gesture Lab');
+    lab.addEventListener('click', cb.onLab);
     const back = this.btn('setup-back', '← Back');
     back.addEventListener('click', cb.onBack);
-    row.append(race, calib, back);
+    row.append(race, calib, lab, back);
     panel.appendChild(row);
 
     el.appendChild(panel);

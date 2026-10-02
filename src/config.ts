@@ -20,6 +20,14 @@ export const TRACKING = {
   WASM_URL: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm',
   MODEL_URL:
     'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task',
+  /**
+   * GestureRecognizer model: classifies Closed_Fist, Open_Palm, Pointing_Up,
+   * Thumb_Up/Down, Victory, ILoveYou in the same inference pass that produces
+   * landmarks — more robust than heuristic curl ratios, and no extra cost
+   * vs HandLandmarker (it IS the hand tracker + a classifier head).
+   */
+  GESTURE_MODEL_URL:
+    'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task',
 } as const;
 
 export const GESTURES = {
@@ -38,12 +46,16 @@ export const GESTURES = {
   /** Deadzone around neutral scale. */
   SCALE_DEADZONE: 0.06,
   /** Pinch must persist this long to flip state (anti-flicker). */
-  PINCH_DEBOUNCE_MS: 120,
+  PINCH_DEBOUNCE_MS: 60,
   /** Both palms open this long => pause menu. */
   PAUSE_HOLD_MS: 500,
-  /** Output smoothing (0..1, higher = snappier). */
-  STEER_SMOOTH: 0.35,
-  THROTTLE_SMOOTH: 0.25,
+  /**
+   * Output smoothing (0..1, higher = snappier). Kept high because the
+   * OneEuro filter with velocity extrapolation already removes jitter
+   * upstream — double-smoothing would just add latency.
+   */
+  STEER_SMOOTH: 0.55,
+  THROTTLE_SMOOTH: 0.45,
 } as const;
 
 export const GAME = {
@@ -74,6 +86,7 @@ export const NET = {
 export const DEFAULT_CALIBRATION: Calibration = {
   neutralAngle: 0,
   neutralScale: 0.16,
+  neutralCx: 0.5,
   pinchDown: 0.45,
   pinchUp: 0.68,
   oneHandMode: false,
@@ -82,6 +95,8 @@ export const DEFAULT_CALIBRATION: Calibration = {
   muted: false,
   speedLimit: 1.0,
   showCamPreview: true,
+  showSkeleton: true,
+  showWheel: true,
 };
 
 export const STORAGE_KEYS = {
