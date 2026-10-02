@@ -15,6 +15,7 @@ import { Screens } from './ui/screens.ts';
 import { GestureLab } from './ui/gesture-lab.ts';
 import { HandSkeletonOverlay } from './ui/hand-skeleton.ts';
 import { VirtualWheel3D } from './ui/virtual-wheel-3d.ts';
+import { MRSpatialView } from './ui/mr-spatial-view.ts';
 import {
   cameraDiagnosticsText,
   cameraFixHint,
@@ -56,6 +57,7 @@ class App {
   private gestureLab: GestureLab | null = null;
   private skeleton: HandSkeletonOverlay | null = null;
   private wheel: VirtualWheel3D | null = null;
+  private mrView: MRSpatialView | null = null;
   private game: Game | null = null;
   private tracking: TrackingClient | null = null;
   private trackingDelegate = '—';
@@ -373,6 +375,7 @@ class App {
   private initOverlays(): void {
     this.skeleton = new HandSkeletonOverlay();
     this.wheel = new VirtualWheel3D();
+    this.mrView = new MRSpatialView();
     this.applyOverlaySettings();
   }
 
@@ -600,6 +603,18 @@ class App {
       this.skeleton?.draw([]);
     }
 
+    // MR Spatial View: camera feed + skeleton overlay (reference quality)
+    if (this.mrView?.isVisible) {
+      this.mrView.draw(frame.hands.map((h) => ({
+        landmarks: h.landmarks,
+        label: h.handedness === 'Unknown' ? 'Left' : h.handedness,
+        pinchDistance: Math.hypot(
+          h.landmarks[4].x - h.landmarks[8].x,
+          h.landmarks[4].y - h.landmarks[8].y,
+        ) * 1000,
+      })));
+    }
+
     if (this.state === 'racing' || this.state === 'paused') {
       const input: DriveInput = { steering: c.steering, throttle: c.throttle, brake: c.brake };
       this.lastInput = input;
@@ -731,6 +746,10 @@ class App {
 
   private onKey(e: KeyboardEvent, down: boolean): void {
     if (e.key === 'Escape') {
+      if (this.mrView?.isVisible) {
+        this.mrView.hide();
+        return;
+      }
       this.closeOverlay();
       return;
     }
@@ -740,6 +759,16 @@ class App {
     if (down && (this.state === 'racing' || this.state === 'paused') && (k === 'p')) {
       if (this.state === 'racing') this.pause();
       else this.resume();
+    }
+    // M toggles MR Spatial View (camera + skeleton overlay, reference quality)
+    if (down && k === 'm') {
+      if (this.mrView?.isVisible) {
+        this.mrView.hide();
+      } else {
+        void this.mrView?.show().catch(() => {
+          this.hud.flash('Camera unavailable for MR view');
+        });
+      }
     }
   }
 
