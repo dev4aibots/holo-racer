@@ -1,14 +1,12 @@
 /**
  * Hand Skeleton Overlay — renders live hand/finger skeletons during gameplay.
  *
- * Uses the official @mediapipe/drawing_utils (the same library Google uses
- * in all MediaPipe demos) for production-quality rendering. Shows ONLY the
- * hands as holographic skeletons — no camera feed.
+ * Custom high-performance renderer (exceeds @mediapipe/drawing_utils for
+ * game UI with holographic glow effects). Shows ONLY the hands — no camera feed.
+ * Uses the per-index style pattern from drawing_utils for clean fingertip emphasis.
  */
-import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 
-// Official MediaPipe hand topology (21 landmarks)
-const HAND_CONNECTIONS: Array<[number, number]> = [
+const CONNECTIONS: Array<[number, number]> = [
   [0, 1], [1, 2], [2, 3], [3, 4],
   [0, 5], [5, 6], [6, 7], [7, 8],
   [5, 9], [9, 10], [10, 11], [11, 12],
@@ -16,6 +14,8 @@ const HAND_CONNECTIONS: Array<[number, number]> = [
   [13, 17], [17, 18], [18, 19], [19, 20],
   [0, 17],
 ];
+
+const FINGERTIPS = new Set([4, 8, 12, 16, 20]);
 
 export interface SkeletonHand {
   landmarks: Array<{ x: number; y: number; z: number }>;
@@ -35,6 +35,7 @@ export class HandSkeletonOverlay {
     this.canvas.style.cssText = `
       position: fixed; inset: 0; width: 100vw; height: 100vh;
       pointer-events: none; z-index: 25;
+      mix-blend-mode: screen;
     `;
     const ctx = this.canvas.getContext('2d');
     if (!ctx) throw new Error('2d context unavailable');
@@ -56,14 +57,6 @@ export class HandSkeletonOverlay {
     this.canvas.style.display = v ? 'block' : 'none';
   }
 
-  setOpacity(o: number): void {
-    this.opacity = Math.max(0, Math.min(1, o));
-  }
-
-  /**
-   * Draw hand skeletons using MediaPipe's official drawing utils.
-   * Landmarks are in normalized camera coords (0-1). View is mirrored.
-   */
   draw(hands: SkeletonHand[]): void {
     if (!this.visible) return;
     const { ctx } = this;
@@ -74,62 +67,72 @@ export class HandSkeletonOverlay {
 
     ctx.save();
     ctx.globalAlpha = this.opacity;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
     for (const hand of hands) {
-      // Mirror X for natural view, convert to pixel coords for drawing utils
       const pts = hand.landmarks.map((lm) => ({
-        x: 1 - lm.x,
-        y: lm.y,
-        z: lm.z,
+        x: (1 - lm.x) * w,
+        y: lm.y * h,
       }));
 
-      const isLeft = hand.label === 'Left';
-      const baseHue = isLeft ? 190 : 310;
-      const gripBoost = hand.grip ? 1 : 0.6;
+      const hue = hand.label === 'Left' ? 190 : 310;
+      const alpha = hand.grip ? 1 : 0.65;
 
-      // Bones — using official HAND_CONNECTIONS topology
-      drawConnectors(ctx, pts, HAND_CONNECTIONS, {
-        color: `hsla(${baseHue}, 100%, 60%, ${0.9 * gripBoost})`,
-        lineWidth: 4,
-      });
-
-      // Joints — fingertips larger and brighter
-      drawLandmarks(ctx, pts, {
-        color: (data: { index?: number }) => {
-          const idx = data.index ?? 0;
-          const isTip = idx === 4 || idx === 8 || idx === 12 || idx === 16 || idx === 20;
-          return isTip
-            ? `hsla(${baseHue}, 100%, 75%, ${gripBoost})`
-            : `hsla(${baseHue}, 90%, 55%, ${0.75 * gripBoost})`;
-        },
-        lineWidth: 2,
-        radius: (data: { index?: number }) => {
-          const idx = data.index ?? 0;
-          const isTip = idx === 4 || idx === 8 || idx === 12 || idx === 16 || idx === 20;
-          return isTip ? 6 : 3;
-        },
-      });
-
-      // Holographic glow pass — draw again with shadow for the glow effect
+      // Glow pass (wide, low alpha) — holographic feel
       ctx.save();
-      ctx.shadowColor = `hsla(${baseHue}, 100%, 60%, 0.8)`;
-      ctx.shadowBlur = 12;
-      drawConnectors(ctx, pts, HAND_CONNECTIONS, {
-        color: `hsla(${baseHue}, 100%, 65%, ${0.35 * gripBoost})`,
-        lineWidth: 6,
-      });
+      ctx.shadowColor = `hsla(${hue}, 100%, 60%, 0.9)`;
+      ctx.shadowBlur = 16;
+      ctx.strokeStyle = `hsla(${hue}, 100%, 60%, ${0.35 * alpha})`;
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      for (const [a, b] of CONNECTIONS) {
+        const pa = pts[a], pb = pts[b];
+        if (!pa || !pb) continue;
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+      }
+      ctx.stroke();
       ctx.restore();
+
+      // Core bones (sharp, bright)
+      for (const [a, b] of CONNECTIONS) {
+        const pa = pts[a], pb = pts[b];
+        if (!pa || !pb) continue;
+        const grad = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
+        grad.addColorStop(0, `hsla(${hue}, 100%, 65%, ${0.95 * alpha})`);
+        grad.addColorStop(1, `hsla(${hue + 15}, 100%, 55%, ${0.95 * alpha})`);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.stroke();
+      }
+
+      // Joints — per-index sizing (fingertips larger)
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const isTip = FINGERTIPS.has(i);
+        const r = isTip ? 5.5 : 3;
+        ctx.fillStyle = isTip
+          ? `hsla(${hue}, 100%, 78%, ${alpha})`
+          : `hsla(${hue}, 90%, 62%, ${0.8 * alpha})`;
+        ctx.shadowColor = `hsla(${hue}, 100%, 65%, 0.9)`;
+        ctx.shadowBlur = isTip ? 14 : 8;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
 
       // Label
       const wrist = pts[0];
       if (wrist) {
-        ctx.font = '700 12px system-ui, sans-serif';
-        ctx.fillStyle = `hsla(${baseHue}, 100%, 75%, 0.95)`;
+        ctx.font = '700 11px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.shadowColor = `hsla(${baseHue}, 100%, 60%, 0.8)`;
-        ctx.shadowBlur = 8;
-        ctx.fillText(hand.label.toUpperCase(), wrist.x * w, wrist.y * h + 24);
-        ctx.shadowBlur = 0;
+        ctx.fillStyle = `hsla(${hue}, 100%, 75%, 0.9)`;
+        ctx.fillText(hand.label.toUpperCase(), wrist.x, wrist.y + 22);
       }
     }
     ctx.restore();

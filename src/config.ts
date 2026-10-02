@@ -16,7 +16,9 @@ export const TRACKING = {
   MIN_TRACKING_CONFIDENCE: 0.5,
   MIN_PRESENCE_CONFIDENCE: 0.5,
   /** WASM runtime + model. WASM is pinned to the bundled tasks-vision
-   *  version; the model uses the `latest` alias so it auto-updates. */
+   *  version. Uses jsDelivr CDN (highly reliable, globally distributed).
+   *  For self-hosted deployments, copy public/mediapipe/* to your server
+   *  and change these to '/mediapipe'. */
   WASM_URL: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm',
   MODEL_URL:
     'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task',
