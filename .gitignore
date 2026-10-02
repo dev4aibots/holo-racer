@@ -23,3 +23,4 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+tests/e2e/tests/e2e/report/
