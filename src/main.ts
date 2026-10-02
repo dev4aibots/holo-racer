@@ -14,7 +14,7 @@ import { HUD } from './ui/hud.ts';
 import { Screens } from './ui/screens.ts';
 import { GestureLab } from './ui/gesture-lab.ts';
 import { HandSkeletonOverlay } from './ui/hand-skeleton.ts';
-import { VirtualWheel } from './ui/virtual-wheel.ts';
+import { VirtualWheel3D } from './ui/virtual-wheel-3d.ts';
 import {
   cameraDiagnosticsText,
   cameraFixHint,
@@ -55,7 +55,7 @@ class App {
   private screens: Screens;
   private gestureLab: GestureLab | null = null;
   private skeleton: HandSkeletonOverlay | null = null;
-  private wheel: VirtualWheel | null = null;
+  private wheel: VirtualWheel3D | null = null;
   private game: Game | null = null;
   private tracking: TrackingClient | null = null;
   private trackingDelegate = '—';
@@ -372,7 +372,7 @@ class App {
   /** Create the hand-driven control overlays (skeleton + virtual wheel). */
   private initOverlays(): void {
     this.skeleton = new HandSkeletonOverlay();
-    this.wheel = new VirtualWheel();
+    this.wheel = new VirtualWheel3D();
     this.applyOverlaySettings();
   }
 

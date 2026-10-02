@@ -1,26 +1,20 @@
 /**
  * Hand Skeleton Overlay — renders live hand/finger skeletons during gameplay.
  *
- * Shows ONLY the hands (21 landmarks + connections per hand) as holographic
- * skeletons. No camera feed. This gives the player visual feedback of their
- * finger tracking while keeping the screen focused on the game.
+ * Uses the official @mediapipe/drawing_utils (the same library Google uses
+ * in all MediaPipe demos) for production-quality rendering. Shows ONLY the
+ * hands as holographic skeletons — no camera feed.
  */
+import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 
-const CONNECTIONS: Array<[number, number]> = [
-  // Wrist to finger bases
-  [0, 1], [0, 5], [0, 9], [0, 13], [0, 17],
-  // Thumb
-  [1, 2], [2, 3], [3, 4],
-  // Index
-  [5, 6], [6, 7], [7, 8],
-  // Middle
-  [9, 10], [10, 11], [11, 12],
-  // Ring
-  [13, 14], [14, 15], [15, 16],
-  // Pinky
-  [17, 18], [18, 19], [19, 20],
-  // Knuckle arc
-  [5, 9], [9, 13], [13, 17],
+// Official MediaPipe hand topology (21 landmarks)
+const HAND_CONNECTIONS: Array<[number, number]> = [
+  [0, 1], [1, 2], [2, 3], [3, 4],
+  [0, 5], [5, 6], [6, 7], [7, 8],
+  [5, 9], [9, 10], [10, 11], [11, 12],
+  [9, 13], [13, 14], [14, 15], [15, 16],
+  [13, 17], [17, 18], [18, 19], [19, 20],
+  [0, 17],
 ];
 
 export interface SkeletonHand {
@@ -33,7 +27,7 @@ export class HandSkeletonOverlay {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private visible = true;
-  private opacity = 0.9;
+  private opacity = 0.95;
 
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -67,8 +61,8 @@ export class HandSkeletonOverlay {
   }
 
   /**
-   * Draw hand skeletons. Landmarks are in normalized camera coords
-   * (0-1, origin top-left). The view is mirrored for a natural feel.
+   * Draw hand skeletons using MediaPipe's official drawing utils.
+   * Landmarks are in normalized camera coords (0-1). View is mirrored.
    */
   draw(hands: SkeletonHand[]): void {
     if (!this.visible) return;
@@ -82,58 +76,60 @@ export class HandSkeletonOverlay {
     ctx.globalAlpha = this.opacity;
 
     for (const hand of hands) {
+      // Mirror X for natural view, convert to pixel coords for drawing utils
       const pts = hand.landmarks.map((lm) => ({
-        x: (1 - lm.x) * w, // mirror
-        y: lm.y * h,
+        x: 1 - lm.x,
+        y: lm.y,
         z: lm.z,
       }));
 
-      const hue = hand.label === 'Left' ? 190 : 310; // cyan / magenta
-      const gripGlow = hand.grip ? 1 : 0.55;
+      const isLeft = hand.label === 'Left';
+      const baseHue = isLeft ? 190 : 310;
+      const gripBoost = hand.grip ? 1 : 0.6;
 
-      // Bones
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-      for (const [a, b] of CONNECTIONS) {
-        const pa = pts[a];
-        const pb = pts[b];
-        if (!pa || !pb) continue;
-        const grad = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
-        grad.addColorStop(0, `hsla(${hue}, 100%, 65%, ${0.85 * gripGlow})`);
-        grad.addColorStop(1, `hsla(${hue + 20}, 100%, 55%, ${0.85 * gripGlow})`);
-        ctx.strokeStyle = grad;
-        ctx.shadowColor = `hsla(${hue}, 100%, 60%, 0.8)`;
-        ctx.shadowBlur = 8;
-        ctx.beginPath();
-        ctx.moveTo(pa.x, pa.y);
-        ctx.lineTo(pb.x, pb.y);
-        ctx.stroke();
-      }
-      ctx.shadowBlur = 0;
+      // Bones — using official HAND_CONNECTIONS topology
+      drawConnectors(ctx, pts, HAND_CONNECTIONS, {
+        color: `hsla(${baseHue}, 100%, 60%, ${0.9 * gripBoost})`,
+        lineWidth: 4,
+      });
 
-      // Joints
-      for (let i = 0; i < pts.length; i++) {
-        const p = pts[i];
-        const isTip = i === 4 || i === 8 || i === 12 || i === 16 || i === 20;
-        const r = isTip ? 5 : 3;
-        ctx.fillStyle = isTip
-          ? `hsla(${hue}, 100%, 75%, ${gripGlow})`
-          : `hsla(${hue}, 90%, 60%, ${0.7 * gripGlow})`;
-        ctx.shadowColor = `hsla(${hue}, 100%, 65%, 0.9)`;
-        ctx.shadowBlur = isTip ? 12 : 6;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.shadowBlur = 0;
+      // Joints — fingertips larger and brighter
+      drawLandmarks(ctx, pts, {
+        color: (data: { index?: number }) => {
+          const idx = data.index ?? 0;
+          const isTip = idx === 4 || idx === 8 || idx === 12 || idx === 16 || idx === 20;
+          return isTip
+            ? `hsla(${baseHue}, 100%, 75%, ${gripBoost})`
+            : `hsla(${baseHue}, 90%, 55%, ${0.75 * gripBoost})`;
+        },
+        lineWidth: 2,
+        radius: (data: { index?: number }) => {
+          const idx = data.index ?? 0;
+          const isTip = idx === 4 || idx === 8 || idx === 12 || idx === 16 || idx === 20;
+          return isTip ? 6 : 3;
+        },
+      });
 
-      // Wrist label
+      // Holographic glow pass — draw again with shadow for the glow effect
+      ctx.save();
+      ctx.shadowColor = `hsla(${baseHue}, 100%, 60%, 0.8)`;
+      ctx.shadowBlur = 12;
+      drawConnectors(ctx, pts, HAND_CONNECTIONS, {
+        color: `hsla(${baseHue}, 100%, 65%, ${0.35 * gripBoost})`,
+        lineWidth: 6,
+      });
+      ctx.restore();
+
+      // Label
       const wrist = pts[0];
       if (wrist) {
-        ctx.font = '600 11px system-ui, sans-serif';
-        ctx.fillStyle = `hsla(${hue}, 100%, 70%, 0.9)`;
+        ctx.font = '700 12px system-ui, sans-serif';
+        ctx.fillStyle = `hsla(${baseHue}, 100%, 75%, 0.95)`;
         ctx.textAlign = 'center';
-        ctx.fillText(hand.label.toUpperCase(), wrist.x, wrist.y + 22);
+        ctx.shadowColor = `hsla(${baseHue}, 100%, 60%, 0.8)`;
+        ctx.shadowBlur = 8;
+        ctx.fillText(hand.label.toUpperCase(), wrist.x * w, wrist.y * h + 24);
+        ctx.shadowBlur = 0;
       }
     }
     ctx.restore();
