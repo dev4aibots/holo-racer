@@ -36,12 +36,50 @@ function angleDiff(a: number, b: number): number {
 
 /** Trust MediaPipe's classifier directly — no custom curl logic. */
 export function isFist(hand: TrackedHand): boolean {
-  return hand.gesture === 'Closed_Fist';
+  return isClosedHand(hand.landmarks);
 }
 
 /** Trust MediaPipe's classifier directly. */
 export function isPalmOpen(hand: TrackedHand): boolean {
-  return hand.gesture === 'Open_Palm';
+  return isOpenPalm(hand.landmarks);
+}
+
+/**
+ * Geometric fist detection from iakashkanaujiya/car_driving.
+ * Counts folded fingers: tip-to-wrist < MCP-to-wrist × 1.58.
+ * More robust than neural classifier across hand sizes/lighting.
+ * Zero inference cost — pure math on landmarks.
+ */
+export function isClosedHand(landmarks: Landmark[]): boolean {
+  if (landmarks.length < 21) return false;
+  const wrist = landmarks[LM.WRIST];
+  const tips = [LM.INDEX_TIP, LM.MIDDLE_TIP, LM.RING_TIP, LM.PINKY_TIP];
+  const mcps = [LM.INDEX_MCP, LM.MIDDLE_MCP, LM.RING_MCP, LM.PINKY_MCP];
+  let folded = 0;
+  for (let i = 0; i < tips.length; i++) {
+    const tipDist = dist(landmarks[tips[i]], wrist);
+    const mcpDist = dist(landmarks[mcps[i]], wrist);
+    if (tipDist < mcpDist * 1.58) folded++;
+  }
+  return folded >= 3;
+}
+
+/**
+ * Geometric open palm detection from iakashkanaujiya/car_driving.
+ * Counts extended fingers: tip-to-wrist > MCP-to-wrist × 1.65.
+ */
+export function isOpenPalm(landmarks: Landmark[]): boolean {
+  if (landmarks.length < 21) return false;
+  const wrist = landmarks[LM.WRIST];
+  const tips = [LM.INDEX_TIP, LM.MIDDLE_TIP, LM.RING_TIP, LM.PINKY_TIP];
+  const mcps = [LM.INDEX_MCP, LM.MIDDLE_MCP, LM.RING_MCP, LM.PINKY_MCP];
+  let extended = 0;
+  for (let i = 0; i < tips.length; i++) {
+    const tipDist = dist(landmarks[tips[i]], wrist);
+    const mcpDist = dist(landmarks[mcps[i]], wrist);
+    if (tipDist > mcpDist * 1.65) extended++;
+  }
+  return extended === 4;
 }
 
 export function handScale(hand: TrackedHand): number {
@@ -149,7 +187,13 @@ export class GestureEngine {
       if (interWrist < GESTURES.GRIP_RATIO * avgScale) {
         gripLocked = true;
         const angle = Math.atan2(wb.y - wa.y, wb.x - wa.x);
-        const rot = angleDiff(angle, this.cal.neutralAngle) / GESTURES.MAX_STEER_RAD;
+        // car_driving steering: 0.56 rad range, 0.045 rad deadzone (jitter filter)
+        const STEER_RANGE = 0.56;
+        const DEADZONE = 0.045;
+        let delta = angleDiff(angle, this.cal.neutralAngle);
+        if (Math.abs(delta) <= DEADZONE) delta = 0;
+        else delta -= Math.sign(delta) * DEADZONE;
+        const rot = clamp(delta / STEER_RANGE, -1, 1);
         const cx = (wa.x + wb.x) / 2;
         const lat = (cx - this.cal.neutralCx) / 0.15;
         const raw = Math.abs(rot) >= Math.abs(lat) ? rot : lat;
