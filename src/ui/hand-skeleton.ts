@@ -76,15 +76,9 @@ export class HandSkeletonOverlay {
         y: lm.y * h,
       }));
 
-      const hue = hand.label === 'Left' ? 190 : 310;
-      const alpha = hand.grip ? 1 : 0.65;
-
-      // Glow pass (wide, low alpha) — holographic feel
-      ctx.save();
-      ctx.shadowColor = `hsla(${hue}, 100%, 60%, 0.9)`;
-      ctx.shadowBlur = 16;
-      ctx.strokeStyle = `hsla(${hue}, 100%, 60%, ${0.35 * alpha})`;
-      ctx.lineWidth = 7;
+      // Bones (reference spec: green [0,200,0], 2px, flat - no glow)
+      ctx.strokeStyle = 'rgb(0, 200, 0)';
+      ctx.lineWidth = 2;
       ctx.beginPath();
       for (const [a, b] of CONNECTIONS) {
         const pa = pts[a], pb = pts[b];
@@ -93,45 +87,30 @@ export class HandSkeletonOverlay {
         ctx.lineTo(pb.x, pb.y);
       }
       ctx.stroke();
-      ctx.restore();
 
-      // Core bones (sharp, bright)
-      for (const [a, b] of CONNECTIONS) {
-        const pa = pts[a], pb = pts[b];
-        if (!pa || !pb) continue;
-        const grad = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
-        grad.addColorStop(0, `hsla(${hue}, 100%, 65%, ${0.95 * alpha})`);
-        grad.addColorStop(1, `hsla(${hue + 15}, 100%, 55%, ${0.95 * alpha})`);
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 3.5;
-        ctx.beginPath();
-        ctx.moveTo(pa.x, pa.y);
-        ctx.lineTo(pb.x, pb.y);
-        ctx.stroke();
-      }
-
-      // Joints — per-index sizing (fingertips larger)
+      // Joints (reference spec: fingertips red 6px, others green 4px, flat)
       for (let i = 0; i < pts.length; i++) {
         const p = pts[i];
         const isTip = FINGERTIPS.has(i);
-        const r = isTip ? 5.5 : 3;
-        ctx.fillStyle = isTip
-          ? `hsla(${hue}, 100%, 78%, ${alpha})`
-          : `hsla(${hue}, 90%, 62%, ${0.8 * alpha})`;
-        ctx.shadowColor = `hsla(${hue}, 100%, 65%, 0.9)`;
-        ctx.shadowBlur = isTip ? 14 : 8;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        ctx.fill();
+        if (isTip) {
+          ctx.fillStyle = '#ff0000';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.fillStyle = 'rgb(0, 200, 0)';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
-      ctx.shadowBlur = 0;
 
       // Label
       const wrist = pts[0];
       if (wrist) {
         ctx.font = '700 11px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillStyle = `hsla(${hue}, 100%, 75%, 0.9)`;
+        ctx.fillStyle = 'rgb(0, 200, 0)';
         ctx.fillText(hand.label.toUpperCase(), wrist.x, wrist.y + 22);
       }
     }

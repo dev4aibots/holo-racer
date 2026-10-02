@@ -24,7 +24,7 @@ export class OneEuroFilter {
   private static readonly EXTRAPOLATE_VEL = 0.5;
   private lookaheadS = 0.015;
 
-  constructor(minCutoff = 1.0, beta = 0.02, dCutoff = 1.0) {
+  constructor(minCutoff = 1.6, beta = 0.02, dCutoff = 1.0) {
     this.minCutoff = minCutoff;
     this.beta = beta;
     this.dCutoff = dCutoff;
