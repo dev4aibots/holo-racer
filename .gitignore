@@ -24,3 +24,5 @@ Thumbs.db
 .env.local
 .env.*.local
 tests/e2e/tests/e2e/report/
+public/mediapipe/*.wasm
+public/mediapipe/*.task
