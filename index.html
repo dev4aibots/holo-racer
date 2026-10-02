@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>HOLO-RACER — hands are the controller</title>
+    <meta name="description" content="Webcam-controlled holographic racing game. Your hands are the steering wheel." />
+    <!-- CSP: no inline scripts, no eval; MediaPipe WASM + model from pinned CDNs.
+         The tracking worker dynamically import()s the MediaPipe WASM ESM loader
+         from the CDN, so the CDN must be in script-src (connect-src is not enough). -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob: https://cdn.jsdelivr.net https://storage.googleapis.com wss: ws:; font-src 'self' data:;"
+    />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🏎️</text></svg>" />
+    <link rel="stylesheet" href="/src/ui/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game-canvas"></canvas>
+      <div id="ui-root"></div>
+      <video id="cam-feed" playsinline muted autoplay style="display:none"></video>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
