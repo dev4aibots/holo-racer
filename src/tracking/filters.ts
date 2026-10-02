@@ -83,19 +83,34 @@ export class LandmarkSmoother {
   private lastRaw: Array<Array<{ x: number; y: number; z: number }>> = [];
   /**
    * Max plausible per-frame landmark movement (normalized units).
-   * At 30fps, 0.15 = 4.5 units/sec — faster than any real hand motion.
-   * Teleports beyond this are rejected as glitches.
+   * Fingertips get a tighter gate (0.10) — they teleport most often.
+   * Palm/wrist use 0.15.
    */
-  private static readonly MAX_TELEPORT = 0.15;
+  private static readonly MAX_TELEPORT_TIP = 0.10;
+  private static readonly MAX_TELEPORT_BASE = 0.15;
+
+  /** Fingertip landmark indices (noisiest, need responsive smoothing). */
+  private static readonly TIPS = new Set([4, 8, 12, 16, 20]);
+  /** Knuckle indices. */
+  private static readonly KNUCKLES = new Set([2, 3, 6, 7, 10, 11, 14, 15, 18, 19]);
 
   constructor(
-    private maxHands = 2,
+    maxHands = 2,
     private landmarks = 21,
-    minCutoff = 1.2,
-    beta = 0.03,
   ) {
-    for (let i = 0; i < this.maxHands * this.landmarks * 3; i++) {
-      this.filters.push(new OneEuroFilter(minCutoff, beta));
+    // Per-landmark One Euro tuning (research-backed):
+    // - Tips: high beta (responsive, they move fast) {1.2, 4.0}
+    // - Knuckles: medium {0.8, 2.5}
+    // - Wrist/palm: heavy smoothing (stable anchor) {0.4, 1.0}
+    for (let h = 0; h < maxHands; h++) {
+      for (let li = 0; li < landmarks; li++) {
+        let mc = 0.4, beta = 1.0;
+        if (LandmarkSmoother.TIPS.has(li)) { mc = 1.2; beta = 4.0; }
+        else if (LandmarkSmoother.KNUCKLES.has(li)) { mc = 0.8; beta = 2.5; }
+        for (let c = 0; c < 3; c++) {
+          this.filters.push(new OneEuroFilter(mc, beta));
+        }
+      }
     }
   }
 
@@ -121,28 +136,37 @@ export class LandmarkSmoother {
       this.lastCount = hands.length;
       this.lastRaw = [];
     }
-    const out = hands.map((lm, hi) =>
-      lm.map((p, li) => {
+    // Store gated raw values for next frame's teleport check.
+    const gatedRaw: Array<Array<{ x: number; y: number; z: number }>> = [];
+    const out = hands.map((lm, hi) => {
+      const handRaw: Array<{ x: number; y: number; z: number }> = [];
+      const result = lm.map((p, li) => {
         const base = (hi * this.landmarks + li) * 3;
-        // Innovation gate: reject teleports.
+        // Innovation gate: tighter for fingertips (they teleport most).
+        const maxTeleport = LandmarkSmoother.TIPS.has(li)
+          ? LandmarkSmoother.MAX_TELEPORT_TIP
+          : LandmarkSmoother.MAX_TELEPORT_BASE;
         const prev = this.lastRaw[hi]?.[li];
         let px = p.x, py = p.y, pz = p.z;
         if (prev) {
           const dx = px - prev.x, dy = py - prev.y, dz = pz - prev.z;
-          if (dx * dx + dy * dy + dz * dz > LandmarkSmoother.MAX_TELEPORT ** 2) {
+          if (dx * dx + dy * dy + dz * dz > maxTeleport ** 2) {
             px = prev.x; py = prev.y; pz = prev.z;
           }
         }
+        handRaw.push({ x: px, y: py, z: pz });
         return {
           x: this.filters[base].filter(px, t),
           y: this.filters[base + 1].filter(py, t),
           z: this.filters[base + 2].filter(pz, t),
         };
-      }),
-    );
-    // Store raw (pre-gate) for next frame's teleport check — use the gated
-    // values so a sustained glitch doesn't permanently poison the reference.
-    this.lastRaw = out.map(hand => hand.map(p => ({ ...p })));
+      });
+      gatedRaw.push(handRaw);
+      return result;
+    });
+    // Store the gated RAW values (not filtered output) for next frame's
+    // teleport check — this prevents prediction bias from poisoning the gate.
+    this.lastRaw = gatedRaw;
     return out;
   }
 }
