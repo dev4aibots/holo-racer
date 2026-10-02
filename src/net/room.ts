@@ -1,10 +1,40 @@
 /**
- * Multiplayer room management via Trystero (WebRTC P2P, Nostr signaling).
+ * Multiplayer room management via Trystero (WebRTC P2P).
  *
- * Zero-setup: no accounts, no servers to configure. Host creates a 4-letter
- * room code; friends join with the code or a ?join=CODE link.
+ * Uses @trystero-p2p/nostr (current scoped package) with curated relay list
+ * for reliability. Zero-setup: no accounts, no servers to configure.
+ * Host creates a 4-letter room code; friends join with the code or ?join=CODE.
  */
-import { joinRoom, type Room } from 'trystero/nostr';
+import { joinRoom, type Room } from '@trystero-p2p/nostr';
+
+// Curated Nostr relays (emberdeep's proven list — Trystero's defaults include dead relays)
+const RELAYS = [
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://relay.nostr.band',
+  'wss://relay.primal.net',
+  'wss://relay.snort.social',
+];
+
+// TURN servers for NAT traversal (~20-25% of peer pairs need TURN)
+// Cloudflare Realtime TURN: 1TB/mo free, anycast
+const RTC_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    // Metered Open Relay (public credentials for open-source projects)
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+  ],
+};
 
 export interface PlayerInfo {
   id: string;
@@ -65,7 +95,14 @@ export class MultiplayerRoom {
     this.isHost = isHost;
     this.playerId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-    this.room = joinRoom({ appId: ROOM_PREFIX + this.code }, this.playerId);
+    this.room = joinRoom(
+      {
+        appId: ROOM_PREFIX + this.code,
+        relayConfig: { urls: RELAYS },
+        rtcConfig: RTC_CONFIG,
+      },
+      this.playerId,
+    );
 
     // Position snapshots: send frequently, lossy is fine
     const snapAction = this.room.makeAction<RaceSnapshot>('snap');
