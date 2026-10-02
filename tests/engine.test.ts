@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CALIBRATION, GESTURES } from '../src/config.ts';
+import { DEFAULT_CALIBRATION } from '../src/config.ts';
 import {
   GestureEngine,
   detectGrip,
