@@ -151,9 +151,11 @@ function palmTemplate(): THREE.Group {
 function buildCoast(group: THREE.Group): void {
   const template = palmTemplate();
   let side = 1;
-  for (let z = 30; z > -SPAN; z -= 45) {
+  // Start palms ahead of the camera (negative z) to avoid near-plane clipping
+  // at spawn. x offset keeps them clear of the road and camera frustum edges.
+  for (let z = -20; z > -SPAN; z -= 45) {
     const palm = template.clone();
-    palm.position.set(side * (12 + Math.random() * 9), 0, z + (Math.random() - 0.5) * 12);
+    palm.position.set(side * (14 + Math.random() * 9), 0, z + (Math.random() - 0.5) * 12);
     palm.rotation.y = Math.random() * Math.PI * 2;
     const s = 0.85 + Math.random() * 0.5;
     palm.scale.set(s, s, s);
