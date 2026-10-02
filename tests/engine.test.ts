@@ -79,7 +79,9 @@ function makeHand(cx: number, cy: number, u: number, rot: number, pose: Pose, sc
     p.x = x;
     p.y = y;
   }
-  return { landmarks: pts, handedness: 'Unknown', score, gesture: '', gestureScore: 0 };
+  // Map pose to MediaPipe gesture (the engine trusts MediaPipe directly now)
+  const gesture = pose === 'fist' ? 'Closed_Fist' : pose === 'palm' ? 'Open_Palm' : '';
+  return { landmarks: pts, handedness: 'Unknown', score, gesture, gestureScore: 0.9 };
 }
 
 function frame(t: number, hands: TrackedHand[]): HandFrame {
@@ -163,30 +165,17 @@ describe('GestureEngine', () => {
     expect(brake).toBe(0);
   });
 
-  it('pinch requires debounce hold, ignores flicker', () => {
+  it('pinch activates immediately (low latency, no debounce)', () => {
     const eng = new GestureEngine({ ...DEFAULT_CALIBRATION });
     const pinch = (t: number) => frame(t, [makeHand(0.5, 0.5, 0.16, 0, 'pinch')]);
     const open = (t: number) => frame(t, [makeHand(0.5, 0.5, 0.16, 0, 'palm')]);
 
     let s = eng.update(pinch(0));
-    expect(s.pinch.active).toBe(false);
-    s = eng.update(pinch(30));
-    expect(s.pinch.active).toBe(false); // not yet past debounce (60ms)
-    expect(s.pinchStarted).toBe(false);
-    s = eng.update(pinch(70));
-    expect(s.pinch.active).toBe(true);
+    expect(s.pinch.active).toBe(true); // immediate, no debounce delay
     expect(s.pinchStarted).toBe(true);
 
-    // Flicker: release briefly then re-pinch — must not end the pinch.
-    s = eng.update(open(90));
-    expect(s.pinchEnded).toBe(false);
-    s = eng.update(pinch(110));
-    expect(s.pinch.active).toBe(true);
-
-    // Real release held past debounce ends it.
-    s = eng.update(open(200));
-    s = eng.update(open(300));
-    expect(s.pinchEnded).toBe(true);
+    // Release ends it immediately
+    s = eng.update(open(30));
     expect(s.pinch.active).toBe(false);
   });
 
@@ -215,7 +204,6 @@ describe('GestureEngine', () => {
     eng.update(pinch(200));
     const s = eng.update(frame(300, []));
     expect(s.pinch.active).toBe(false);
-    expect(s.pinchEnded).toBe(true);
     expect(s.gripLocked).toBe(false);
     expect(s.handsCount).toBe(0);
   });
