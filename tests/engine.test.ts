@@ -139,7 +139,7 @@ describe('grip detection', () => {
 describe('GestureEngine', () => {
   it('steers with grip rotation and converges with smoothing', () => {
     const eng = new GestureEngine({ ...DEFAULT_CALIBRATION });
-    const target = -0.45 / GESTURES.MAX_STEER_RAD; // ≈ -0.69
+    const target = Math.max(-1, -0.45 / GESTURES.MAX_STEER_RAD); // clamped to [-1, 1]
     let s = eng.update(twoFistGrip(0, 0.16, -0.45));
     for (let i = 1; i <= 40; i++) s = eng.update(twoFistGrip(i * 33, 0.16, -0.45));
     expect(s.gripLocked).toBe(true);

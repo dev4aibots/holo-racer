@@ -224,8 +224,8 @@ export class GestureEngine {
       // Rotation steering: vector angle vs calibrated neutral.
       const rotRaw = angleDiff(grip.angle, this.cal.neutralAngle) / GESTURES.MAX_STEER_RAD;
       // Lateral steering: grip center X vs calibrated neutral.
-      // 0.25 normalized units = full lock (generous, forgiving).
-      const latRaw = (grip.cx - this.cal.neutralCx) / 0.25;
+      // 0.15 normalized units = full lock (sensitive, responsive).
+      const latRaw = (grip.cx - this.cal.neutralCx) / 0.15;
       // Use the stronger of the two signals.
       const raw = Math.abs(rotRaw) >= Math.abs(latRaw) ? rotRaw : latRaw;
       steering = clamp(raw * this.cal.sensitivity, -1, 1);

@@ -40,7 +40,7 @@ export const GESTURES = {
   /** Two fists form a grip if wrist distance < GRIP_RATIO * avgScale. */
   GRIP_RATIO: 1.7,
   /** Steering maps grip rotation over ±MAX_STEER_RAD to -1..1. */
-  MAX_STEER_RAD: 0.65,
+  MAX_STEER_RAD: 0.40,
   /** Throttle: fractional hand-size shrink for full throttle. */
   THROTTLE_RANGE: 0.38,
   /** Brake: fractional hand-size growth for full brake. */

@@ -112,11 +112,9 @@ export class MRSpatialView {
         y: lm.y * h,
       }));
 
-      // Green skeleton bones (reference style)
-      ctx.strokeStyle = '#00ff00';
-      ctx.lineWidth = 3;
-      ctx.shadowColor = '#00ff00';
-      ctx.shadowBlur = 8;
+      // Green skeleton bones (reference spec: [0,200,0], 2px, flat)
+      ctx.strokeStyle = 'rgb(0, 200, 0)';
+      ctx.lineWidth = 2;
       ctx.beginPath();
       for (const [a, b] of MRSpatialView.CONNECTIONS) {
         const pa = pts[a], pb = pts[b];
@@ -125,29 +123,20 @@ export class MRSpatialView {
         ctx.lineTo(pb.x, pb.y);
       }
       ctx.stroke();
-      ctx.shadowBlur = 0;
 
-      // Red fingertip dots (reference style) + smaller green joints
+      // Joints (reference spec: fingertips red 6px, others green 4px, flat)
       for (let i = 0; i < pts.length; i++) {
         const p = pts[i];
         const isTip = MRSpatialView.FINGERTIPS.has(i);
         if (isTip) {
           ctx.fillStyle = '#ff0000';
-          ctx.shadowColor = '#ff0000';
-          ctx.shadowBlur = 12;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-          // White core
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
           ctx.fill();
         } else {
-          ctx.fillStyle = '#00ff00';
+          ctx.fillStyle = 'rgb(0, 200, 0)';
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -159,6 +148,24 @@ export class MRSpatialView {
         const mx = (thumbTip.x + indexTip.x) / 2;
         const my = (thumbTip.y + indexTip.y) / 2;
         const pinchPx = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+
+        // Pinch reticle (reference spec: magenta 16px ring/2px outline + 8px fill + 3px white center)
+        // Show when pinching (distance < threshold)
+        if (pinchPx < 60) { // ~pinch engaged
+          ctx.strokeStyle = '#ff00ff';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(mx, my, 16, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = '#ff00ff';
+          ctx.beginPath();
+          ctx.arc(mx, my, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(mx, my, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
 
         // Pinch line
         ctx.strokeStyle = '#ffff00';
